@@ -1,0 +1,13 @@
+{
+    "name": "Smtp",
+    "alias": "smtp",
+    "description": "SMTP module for sending emails",
+    "keywords": ["smtp", "email", "mail"],
+    "priority": 0,
+    "providers": [
+        "Modules\\Smtp\\Providers\\SmtpServiceProvider"
+    ],
+    "files": [
+        "Config/config.php"
+    ]
+}
