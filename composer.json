@@ -12,7 +12,8 @@
         "php": "^8.2",
         "laravel/framework": "^12.0",
         "laravel/tinker": "^2.10.1",
-        "nwidart/laravel-modules": "^12.0"
+        "nwidart/laravel-modules": "^12.0",
+        "wikimedia/composer-merge-plugin": "^2.1"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
@@ -63,12 +64,12 @@
     "extra": {
         "laravel": {
             "dont-discover": []
+        },
+        "merge-plugin": {
+            "include": [
+                "Modules/*/composer.json"
+            ]
         }
-    },
-    "merge-plugin": {
-        "include": [
-            "Modules/*/composer.json"
-        ]
     },
     "config": {
         "optimize-autoloader": true,
