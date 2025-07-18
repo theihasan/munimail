@@ -2,7 +2,12 @@
 
 namespace Modules\SMTP\Console;
 
+use Exception;
+use React\EventLoop\Loop;
+use Psr\Log\LoggerInterface;
+use React\Socket\SocketServer;
 use Illuminate\Console\Command;
+use React\Socket\ConnectionInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Input\InputArgument;
 
@@ -23,8 +28,50 @@ class SmtpServerCommand extends Command
     /**
      * Execute the console command.
      */
-    public function handle() {
-        return 'oke';
+    public function handle(LoggerInterface $logger) 
+    {
+        $this->info('Starting SMTP');
+        $port = (int) $this->option('port');
+        $tlsPort = (int)$this->option('tls-port');
+        $certPath = $this->option('cert');
+        $keyPath = $this->option('key');
+
+        $loop = Loop::get();
+
+        try {
+            $socket = new SocketServer("0.0.0.0:{$port}", [], $loop);
+            $this->info("Listening for plaintext SMTP on tcp://0.0.0.0:{$port}");
+            $this->setupConnectionHandler($socket, $logger);
+        } catch(Exception $e) {
+            $this->error("Could not start plaintext SMTP server: ". $e->getMessage());
+            return Command::FAILURE;
+        }
+
+        if($certPath && $keyPath) {
+            try {
+                $tlsContext = [
+                    'local_cert' => $certPath,
+                    'local_pk' => $keyPath,
+                    'verify_peer' => false
+                ];
+                $tlsSocket = new SocketServer("tls:://0.0.0.0:{$tlsPort}", $tlsContext, $loop);
+                $this->info("Listening for secure SMTP on tls://0.0.0.0:{$tlsPort}");
+                $this->setupConnectionHandler($tlsSocket, $logger);
+            }catch(Exception $e) {
+                $this->error("Could not start TLS SMTP server: ". $e->getMessage());
+                return Command::FAILURE;
+            }
+        } else {
+            $this->warn("TLS certificate and key not provided. TLS SMTP server will not start on port {$tlsPort}.");
+        }
+    }
+
+    private function setupConnectionHandler(SocketServer $socket, LoggerInterface $logger): void
+    {
+        $socket->on('connection', function(ConnectionInterface $connection) use($logger){
+            $remoteAddress = $connection->getRemoteAddress();
+            $this->info("New connection from {$remoteAddress}");
+        });
     }
 
     /**
