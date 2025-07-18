@@ -1,12 +1,11 @@
 {
-    "name": "Smtp",
+    "name": "SMTP",
     "alias": "smtp",
-    "description": "SMTP module for sending emails",
-    "keywords": ["smtp", "email", "mail"],
-    "priority": 1,
+    "description": "",
+    "keywords": [],
+    "priority": 0,
     "providers": [
+        "Modules\\SMTP\\Providers\\SMTPServiceProvider"
     ],
-    "files": [
-       
-    ]
+    "files": []
 }

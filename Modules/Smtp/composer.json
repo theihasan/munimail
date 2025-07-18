@@ -1,7 +1,30 @@
 {
-    "require": {
-        "react/event-loop": "^1.5.0",
-        "react/stream": "^1.4.0",
-        "react/socket":"^1.16.0"
+    "name": "nwidart/smtp",
+    "description": "",
+    "authors": [
+        {
+            "name": "Nicolas Widart",
+            "email": "n.widart@gmail.com"
+        }
+    ],
+    "extra": {
+        "laravel": {
+            "providers": [],
+            "aliases": {
+
+            }
+        }
+    },
+    "autoload": {
+        "psr-4": {
+            "Modules\\SMTP\\": "app/",
+            "Modules\\SMTP\\Database\\Factories\\": "database/factories/",
+            "Modules\\SMTP\\Database\\Seeders\\": "database/seeders/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Modules\\SMTP\\Tests\\": "tests/"
+        }
     }
 }

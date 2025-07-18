@@ -1,3 +1,4 @@
 {
-    "Smtp": true
+    "Smtp": true,
+    "SMTP": true
 }
