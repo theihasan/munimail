@@ -155,4 +155,39 @@ class SmtpServerCommand extends Command
             }
         }
     }
+
+    private function handleCommand(ConnectionInterface $connection, string $line, LoggerInterface $logger)
+    {
+        $state = $connection->state;
+        $command = substr($line, 0, strpos($line, ' '));
+        $command = strtoupper($command ?: strlen($line));
+
+        $args = trim(substr($line, strlen($command)));
+
+        $this->debug("Received command: {$command} with args: '{$args}' from {$connection->getRemoteAddress()} in state {$state->fsmState}");
+
+        return match($command) {
+            'EHLO', 'HELO' => $this->handleEhloCommand($connection, $args, $command),
+            'MAIL' => $this->handleMailCommand($connection, $args),
+            'RCPT' => $this->handleRcptCommand($connection, $args),
+            'DATA' => $this->handleDataCommand($connection),
+            'QUIT' => $this->handleQuitCommand($connection),
+            'RSET' => $this->handleRsetCommand($connection),
+            'NOOP' => $this->handleNoopCommand($connection),
+            'AUTH' => $this->handleAuthCommand($connection, $args),
+            'STARTTLS' => $this->handleStarttlsCommand($connection),
+            'VRFY, EXPN' => $this->handleVrfyCommand($connection, $args),
+            default => $connection->write("500 Error: command not implemented\r\n")
+
+        };
+    }
+
+    private function handleEhloCommand(ConnectionInterface $connection, string $domain, string $command)
+    {
+        $state = $connection->state;
+
+        if($state->fsmState !== "INITIAL" && $state->fsmState !== "AUTHENTICATED") {
+            $connection->write('Oi Mama Na plz');
+        }
+    }
 }
