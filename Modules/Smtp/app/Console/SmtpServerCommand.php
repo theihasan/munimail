@@ -15,7 +15,7 @@ class SmtpServerCommand extends Command
 {
     protected $signature = 'smtp:serve {--port=25 : The port to listen on} {--tls-port=587 : The TLS port to listen on} {--cert= : Path to TLS certificate (PEM)} {--key= : Path to TLS private key (PEM)}';
     protected $description = 'Starts a custom SMTP server using ReactPHP.';
-
+    private array $connection = [];
 
     /**
      * Create a new command instance.
@@ -71,7 +71,37 @@ class SmtpServerCommand extends Command
         $socket->on('connection', function(ConnectionInterface $connection) use($logger){
             $remoteAddress = $connection->getRemoteAddress();
             $this->info("New connection from {$remoteAddress}");
+
+               $connection->state = (object)
+                [
+                    'messageData' => '',
+                    'isAuthenticated' => false,
+                    'isTlsActive' => str_starts_with($connection->getRemoteAddress(), 'tls://'),
+                ]; 
+
+            $this->connection[$remoteAddress] = $connection;
+
+            $connection->write("220 custom.smtp.server ESMTP\r\n");
+
+            $connection->on('data', function($chunk) use($connection, $logger) {
+                $connection->state->buffer .= $chunk; 
+                $this->processBuffer($connection, $logger);
+            });
+
+            $connection->on('close', function() use($connection, $logger, $remoteAddress) {
+                $this->info("Connection from {$remoteAddress} closed");
+                unset($this->connection[$remoteAddress]);
+            });
+
+            $connection->on('error', function(Exception $e) use($connection, $logger, $remoteAddress) {
+                $this->error("Connection error from {$remoteAddress} ". $e->getMessage());
+            });
         });
+
+        $socket->on('error', function(Exception $e) {
+            $this->error('Socket server error ' . $e->getMessage());
+        });
+
     }
 
     /**
@@ -92,5 +122,10 @@ class SmtpServerCommand extends Command
         return [
             ['example', null, InputOption::VALUE_OPTIONAL, 'An example option.', null],
         ];
+    }
+
+    private function processBuffer(ConnectionInterface $connection, LoggerInterface $logger)
+    {
+        
     }
 }
