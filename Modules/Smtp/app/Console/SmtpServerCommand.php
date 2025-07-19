@@ -74,9 +74,11 @@ class SmtpServerCommand extends Command
 
                $connection->state = (object)
                 [
+                    'buffer' => '',
                     'messageData' => '',
                     'isAuthenticated' => false,
                     'isTlsActive' => str_starts_with($connection->getRemoteAddress(), 'tls://'),
+                    'fsmState' => 'COMMAND',
                 ]; 
 
             $this->connection[$remoteAddress] = $connection;
@@ -126,6 +128,31 @@ class SmtpServerCommand extends Command
 
     private function processBuffer(ConnectionInterface $connection, LoggerInterface $logger)
     {
-        
+        $state = $connection->state;
+
+        if($state->fsmState === 'RECEIVING_DATA') {
+            if(str_contains($state->buffer, "\r\n.\r\n")) {
+                list($messagePart, $rest) = explode("r\n.\r\n", $state->buffer, 2);
+                $state->messageData .= $messagePart;
+                $state->buffer = $rest;
+                $this->handleDataCommand($connection, $logger);
+            }
+        } else {
+            $this->warning('Condition goes to else block');
+            $state->messageData .= $state->buffer;
+            $state->buffer = '';
+        }
+        return;
+
+        while(str_contains($state->buffer, "\r\n")) {
+            list($line, $rest) = explode("\r\n", $state->buffer, 2);
+            $state->buffer = $rest;
+            $this->handleCommand($connection, $line, $logger); 
+
+            if($state->fsmState === "RECEIVING_DATA") {
+               $this->processBuffer($connection, $logger);
+               break;
+            }
+        }
     }
 }
