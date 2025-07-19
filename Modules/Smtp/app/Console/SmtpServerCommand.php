@@ -188,6 +188,35 @@ class SmtpServerCommand extends Command
 
         if($state->fsmState !== "INITIAL" && $state->fsmState !== "AUTHENTICATED") {
             $connection->write('Oi Mama Na plz');
+            return;
         }
+
+        $state->fsmState = "HELLO RECIVED"; 
+        $state->sender = null;
+        $state->recipients = [];
+        $state->messageData = '';
+
+        $response =  "250 - {$domain} Hello {$connection->getRemoteAddress()} \r\n";
+
+        if($command === "EHLO") {
+            $response.= "250-PIPELINING\r\n"; // Not fully implemented. Future it will be implement base on demand.
+            $response.= "250-SIZE 10485760\r\n"; // For now it is limited to 10 MB
+
+            if(! $state->isTlsActive) {
+                $response.= "250-STARTTLS\r\n";
+            }
+
+            $response.= "250-AUTH PLAIN LOGIN\r\n"; 
+            $response.= "250 HELP\r\n";
+        } else {
+            $response.= "250 OK\r\n";
+        }
+
+        $connection->write($response);
+    }
+
+    private function handleDataCommand()
+    {
+        return 'testing';
     }
 }
