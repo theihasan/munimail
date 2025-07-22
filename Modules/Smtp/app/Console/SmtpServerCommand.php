@@ -161,10 +161,9 @@ class SmtpServerCommand extends Command
     private function handleCommand(ConnectionInterface $connection, string $line, LoggerInterface $logger)
     {
         $state = $connection->state;
-        $command = substr($line, 0, strpos($line, ' '));
-        $command = strtoupper($command ?: strlen($line));
-
-        $args = trim(substr($line, strlen($command)));
+        $parts = explode(' ', $line, 2);
+        $command = strtoupper($parts[0]);
+        $args = isset($parts[1]) ? $parts[1] : '';
 
         $this->info("Received command: {$command} with args: '{$args}' from {$connection->getRemoteAddress()} in state {$state->fsmState}");
 
@@ -285,12 +284,18 @@ class SmtpServerCommand extends Command
     {
         $state = $connection->state;
         
-        if($state->fsmState !== "HELLO_RECEIVED") {
+        if($state->fsmState !== "RCPT_TO_RECEIVED") {
             $connection->write("503 Error: need MAIL command\r\n");
             return;
         }
         
         $state->fsmState = "RECEIVING_DATA";
         $connection->write("354 Start mail input; end with <CRLF>.<CRLF>\r\n");
+    }
+
+    private function handleQuitCommand(ConnectionInterface $connection)
+    {
+        $connection->write("221 Bye\r\n");
+        $connection->end();
     }
 }
