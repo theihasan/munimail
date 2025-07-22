@@ -270,6 +270,11 @@ class SmtpServerCommand extends Command
             return;
         }
 
+        if (isset($state->sender) && strtolower($recipient) === strtolower($state->sender)) {
+            $connection->write("553 <{$recipient}>: Recipient address rejected: Sender and recipient cannot be the same\r\n");
+            return;
+        }
+
         $state->recipients[] = $recipient;
         $state->fsmState = 'RCPT_TO_RECEIVED';
         $connection->write("250 OK: Recipient {$recipient} accepted\r\n");
