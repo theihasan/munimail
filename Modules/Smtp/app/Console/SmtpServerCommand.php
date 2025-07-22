@@ -248,6 +248,34 @@ class SmtpServerCommand extends Command
         $connection->write("250 OK: Sender {$state->sender} accepted\r\n");
     }
 
+    private function handleRcptCommand(ConnectionInterface $connection, string $args)
+    {
+        $state = $connection->state;
+
+        if($state->fsmState !== 'MAIL_FROM_RECEIVED') {
+            $connection->write("503 Error: bad sequence of commands\r\n");
+            return;
+        }
+
+        if(!preg_match('/^TO:\s*<([^>]+)>$/i', $args, $matches)) {
+            $connection->write("501 Syntax error in parameter or arguments\r\n");
+            return;
+        }
+
+        $recipient = $matches[1];
+
+        //Currently go with simple validation. In future it will be implemented.
+        if(! filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+            $connection->write("553 <{$recipient}>: Recipient address rejected: Malformed address\r\n");
+            return;
+        }
+
+        $state->recipients[] = $recipient;
+        $state->fsmState = 'RCPT_TO_RECEIVED';
+        $connection->write("250 OK: Recipient {$recipient} accepted\r\n");
+
+    }
+
     private function handleDataCommand(ConnectionInterface $connection, LoggerInterface $logger = null)
     {
         $state = $connection->state;
