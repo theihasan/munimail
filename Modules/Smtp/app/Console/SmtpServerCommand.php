@@ -64,6 +64,8 @@ class SmtpServerCommand extends Command
         } else {
             $this->warn("TLS certificate and key not provided. TLS SMTP server will not start on port {$tlsPort}.");
         }
+        $this->info('SMTP server started. Press Ctrl+C to stop.');
+        $loop->run();
     }
 
     private function setupConnectionHandler(SocketServer $socket, LoggerInterface $logger): void
@@ -78,7 +80,7 @@ class SmtpServerCommand extends Command
                     'messageData' => '',
                     'isAuthenticated' => false,
                     'isTlsActive' => str_starts_with($connection->getRemoteAddress(), 'tls://'),
-                    'fsmState' => 'COMMAND',
+                    'fsmState' => 'INITIAL',
                 ]; 
 
             $this->connection[$remoteAddress] = $connection;
@@ -129,29 +131,29 @@ class SmtpServerCommand extends Command
     private function processBuffer(ConnectionInterface $connection, LoggerInterface $logger)
     {
         $state = $connection->state;
-
+    
         if($state->fsmState === 'RECEIVING_DATA') {
             if(str_contains($state->buffer, "\r\n.\r\n")) {
-                list($messagePart, $rest) = explode("r\n.\r\n", $state->buffer, 2);
+                list($messagePart, $rest) = explode("\r\n.\r\n", $state->buffer, 2);
                 $state->messageData .= $messagePart;
                 $state->buffer = $rest;
-                $this->handleDataCommand($connection, $logger);
+                $state->fsmState = "HELLO_RECEIVED";
+                $connection->write("250 OK: Message accepted\r\n");
             }
-        } else {
-            $this->warning('Condition goes to else block');
-            $state->messageData .= $state->buffer;
-            $state->buffer = '';
+            return;
         }
-        return;
-
+    
+        // Process commands line by line
         while(str_contains($state->buffer, "\r\n")) {
             list($line, $rest) = explode("\r\n", $state->buffer, 2);
             $state->buffer = $rest;
+            
+            $this->info("Processing command: '{$line}'");
+            
             $this->handleCommand($connection, $line, $logger); 
-
+    
             if($state->fsmState === "RECEIVING_DATA") {
-               $this->processBuffer($connection, $logger);
-               break;
+                break;
             }
         }
     }
@@ -164,7 +166,7 @@ class SmtpServerCommand extends Command
 
         $args = trim(substr($line, strlen($command)));
 
-        $this->debug("Received command: {$command} with args: '{$args}' from {$connection->getRemoteAddress()} in state {$state->fsmState}");
+        $this->info("Received command: {$command} with args: '{$args}' from {$connection->getRemoteAddress()} in state {$state->fsmState}");
 
         return match($command) {
             'EHLO', 'HELO' => $this->handleEhloCommand($connection, $args, $command),
@@ -185,38 +187,77 @@ class SmtpServerCommand extends Command
     private function handleEhloCommand(ConnectionInterface $connection, string $domain, string $command)
     {
         $state = $connection->state;
-
-        if($state->fsmState !== "INITIAL" && $state->fsmState !== "AUTHENTICATED") {
-            $connection->write('Oi Mama Na plz');
+    
+        // Fix: Allow INITIAL state
+        if($state->fsmState !== "INITIAL" && $state->fsmState !== "HELLO_RECEIVED") {
+            $connection->write("503 Error: bad sequence of commands\r\n");
             return;
         }
 
-        $state->fsmState = "HELLO RECIVED"; 
+        $state->fsmState = "HELLO_RECEIVED"; 
         $state->sender = null;
         $state->recipients = [];
         $state->messageData = '';
-
-        $response =  "250 - {$domain} Hello {$connection->getRemoteAddress()} \r\n";
-
+    
+        $response = "250-{$domain} Hello {$connection->getRemoteAddress()}\r\n";
+    
         if($command === "EHLO") {
-            $response.= "250-PIPELINING\r\n"; // Not fully implemented. Future it will be implement base on demand.
-            $response.= "250-SIZE 10485760\r\n"; // For now it is limited to 10 MB
-
+            // Remove this line: dd($connection->getRemoteAddress());
+            $response.= "250-PIPELINING\r\n";
+            $response.= "250-SIZE 10485760\r\n";
+    
             if(! $state->isTlsActive) {
                 $response.= "250-STARTTLS\r\n";
             }
-
+    
             $response.= "250-AUTH PLAIN LOGIN\r\n"; 
             $response.= "250 HELP\r\n";
         } else {
             $response.= "250 OK\r\n";
         }
-
+    
         $connection->write($response);
     }
 
-    private function handleDataCommand()
+    private function handleMailCommand(ConnectionInterface $connection, string $args)
     {
-        return 'testing';
+        $state = $connection->state;
+       
+        if($state->fsmState !== 'INITIAL' && $state->fsmState !== 'HELLO_RECEIVED') {
+            $connection->write("503 Error: bad sequence of commands\r\n");
+            return;
+        }
+
+        if(!preg_match('/^FROM:\s*<([^>]+)>$/i', $args, $matches)) {
+            $connection->write("501 Syntax error in parameter or arguments\r\n");
+            return;
+        }
+
+        $sender = $matches[1];
+
+        //Email verification. Currently using just a simple regex. In future MX record look up will be implemented.
+        if(! filter_var($sender, FILTER_VALIDATE_EMAIL)) {
+            $connection->write("553 <{$sender}>: Sender address rejected: Malformed address\r\n");
+            return;
+        }
+
+        $state->sender = $sender;
+        $state->recipients = [];
+        $state->messageData = '';
+        $state->fsmState = 'MAIL_FROM_RECEIVED';
+        $connection->write("250 OK: Sender {$state->sender} accepted\r\n");
+    }
+
+    private function handleDataCommand(ConnectionInterface $connection, LoggerInterface $logger = null)
+    {
+        $state = $connection->state;
+        
+        if($state->fsmState !== "HELLO_RECEIVED") {
+            $connection->write("503 Error: need MAIL command\r\n");
+            return;
+        }
+        
+        $state->fsmState = "RECEIVING_DATA";
+        $connection->write("354 Start mail input; end with <CRLF>.<CRLF>\r\n");
     }
 }
