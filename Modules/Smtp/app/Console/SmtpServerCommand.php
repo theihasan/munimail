@@ -351,7 +351,7 @@ class SmtpServerCommand extends Command
 
         return match($mechanism){
             'PLAIN' => $this->handlePlainAuth($connection, $parts[1] ?? ''),
-            'LOGIN' => $this->handleLoginAuth($connection, $args),
+            'LOGIN' => $this->handleLoginAuth($connection),
             default => $connection->write("500 Error: Authentication mechanism not supported\r\n")
         };
 
@@ -396,6 +396,27 @@ class SmtpServerCommand extends Command
             });
         }
         
+    }
+
+    private function handleLoginAuth(ConnectionInterface $connection)
+    {
+        $state = $connection->state;
+        $connection->write("334 ". base64_encode("Username:"). "\r\n");
+
+        $connection->once('data', function ($data) use($connection) {
+            $username = base64_decode(trim($data));
+            $connection->write("334 ". base64_encode("Password:"). "\r\n");
+            $connection->once('data', function ($data) use($connection, $username) {
+                $password = base64_decode($data);
+                $this->authenticateUser($connection, $username, $password);
+            });
+        });
+
+    }
+
+    private function authenticateUser(ConnectionInterface $connection, string $username, string $password)
+    {
+        //It will be implement tomorrow night insallah
     }
 
 }
