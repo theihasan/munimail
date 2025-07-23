@@ -298,4 +298,14 @@ class SmtpServerCommand extends Command
         $connection->write("221 Bye\r\n");
         $connection->end();
     }
+
+    private function handleRsetCommand(ConnectionInterface $connection)
+    {
+        $state = $connection->state;
+        $state->fsmState = 'HELLO_RECEIVED';
+        $state->sender = '';
+        $state->recipients = [];
+        $state->messageData = '';
+        $connection->write("250 OK: Reset\r\n");
+    }
 }
