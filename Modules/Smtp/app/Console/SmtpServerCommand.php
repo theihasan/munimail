@@ -308,4 +308,27 @@ class SmtpServerCommand extends Command
         $state->messageData = '';
         $connection->write("250 OK: Reset\r\n");
     }
+
+    private function handleStarttlsCommand(ConnectionInterface $connection)
+    {
+        $state = $connection->state;
+        
+        if($state->fsmState !==  'HELO_RECEIVED') {
+            $connection->write("503 Bad sequence of commands or TLS already active\r\n");
+            return;
+        }
+
+        $connection->write("220 TLS go ahead\r\n");
+
+        $connection->startTls()->then(function () use ($connection, $state) {
+            $state->isTlsActive = true;
+            $connection->write("250 Ready to start TLS\r\n");
+            $state->fsmState = 'INITIAL'; // Reset FSM to expect EHLO/HELO again over TLS
+            $connection->state->isAuthenticated = false; // Reset auth state after TLS
+        }, function (\Exception $e) use ($connection, $state) {
+            $this->error("TLS handshake failed for {$connection->getRemoteAddress()}: ". $e->getMessage());
+            $connection->end("550 TLS handshake failed\r\n");
+            $connection->close();
+        });
+    }
 }
