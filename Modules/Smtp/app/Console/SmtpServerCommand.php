@@ -350,10 +350,52 @@ class SmtpServerCommand extends Command
         $mechanism = strtoupper($parts[0] ?? '');
 
         return match($mechanism){
-            'PLAIN' => $this->handlePlainAuth($connection, $args),
+            'PLAIN' => $this->handlePlainAuth($connection, $parts[1] ?? ''),
             'LOGIN' => $this->handleLoginAuth($connection, $args),
             default => $connection->write("500 Error: Authentication mechanism not supported\r\n")
         };
 
     }
+
+    private function handlePlainAuth(ConnectionInterface $connection, string $initialResponse)
+    {
+        $state = $connection->state;
+
+        if($state->fsmState !== 'HELLO_RECEIVED') {
+            $connection->write("503 Error: bad sequence of commands\r\n");
+        }
+
+        if($initialResponse) {
+            $decodeResponse = base64_decode($initialResponse);
+            // Format: authorization identity (optional) + NUL + authentication identity + NUL + password
+            // Example: \0username\0password
+
+            $parts = explode("\0", $decodeResponse);
+
+            if(count($parts) === 3) {
+                $username = $parts[1] ?? '';
+                $password = $parts[2] ?? '';
+
+                $this->authenticateUser($connection, $username, $password);
+            } else {
+                $connection->write("535 5.7.8 Authentication credentials invalid\r\n");
+            }
+        } else {
+            $connection->write("334\r\n");
+            $connection->once('data', function ($data) use($connection) {
+                $decodedData = base64_decode($data);
+                $parts = explode("\0", $decodedData);
+
+                if(count($parts) === 3) {
+                    $username = $parts[0] ?? '';
+                    $password = $parts[1] ?? '';
+                    $this->authenticateUser($connection, $username, $password);
+                } else {
+                    $connection->write("535 5.7.8 Authentication credentials invalid\r\n");
+                }
+            });
+        }
+        
+    }
+
 }
