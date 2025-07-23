@@ -178,7 +178,7 @@ class SmtpServerCommand extends Command
             'AUTH' => $this->handleAuthCommand($connection, $args),
             'STARTTLS' => $this->handleStarttlsCommand($connection),
             'VRFY, EXPN' => $this->handleVrfyCommand($connection, $args),
-            default => $connection->write("500 Error: command not implemented\r\n")
+            default => $connection->write("500 Error: {$command} not implemented\r\n")
 
         };
     }
@@ -330,5 +330,30 @@ class SmtpServerCommand extends Command
             $connection->end("550 TLS handshake failed\r\n");
             $connection->close();
         });
+    }
+
+    private function handleAuthCommand(ConnectionInterface $connection, string $args)
+    {
+        $state = $connection->state;
+
+        if(! $state->isTlsActive) {
+            $connection->write("503 Error: TLS required for authentication\r\n");
+            return;
+        }
+
+        if($state->fsmState !== 'HELLO_RECEIVED') {
+            $connection->write("503 Error: bad sequence of commands\r\n");
+            return;
+        }
+
+        $parts = explode(' ', $args);
+        $mechanism = strtoupper($parts[0] ?? '');
+
+        return match($mechanism){
+            'PLAIN' => $this->handlePlainAuth($connection, $args),
+            'LOGIN' => $this->handleLoginAuth($connection, $args),
+            default => $connection->write("500 Error: Authentication mechanism not supported\r\n")
+        };
+
     }
 }
