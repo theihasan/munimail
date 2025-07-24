@@ -9,6 +9,7 @@ use Psr\Log\LoggerInterface;
 use React\Socket\SocketServer;
 use Illuminate\Console\Command;
 use React\Socket\ConnectionInterface;
+use Modules\SMTP\Jobs\ProcessIncomingEmail;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Input\InputArgument;
 
@@ -540,7 +541,18 @@ class SmtpServerCommand extends Command
         
         if ($success) {
             $connection->write("250 OK: Message accepted\r\n");
-            $this->info("Email from {$state->sender} ({$state->bytesReceived} bytes) saved to Maildir");
+            
+            $uniqueId = basename($state->tempFilePath, '.tmp');
+            $finalPath = storage_path('app/maildir/new/' . $uniqueId);
+            
+           ProcessIncomingEmail::dispatch(
+                $finalPath,
+                $state->sender,
+                $state->recipients,
+                $state->bytesReceived
+            );
+            
+            $this->info("Email from {$state->sender} ({$state->bytesReceived} bytes) saved to Maildir and queued for processing");
         } else {
             $connection->write("451 Temporary failure: Unable to save email\r\n");
         }
