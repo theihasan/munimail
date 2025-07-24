@@ -75,17 +75,20 @@ class SmtpServerCommand extends Command
             $remoteAddress = $connection->getRemoteAddress();
             $this->info("New connection from {$remoteAddress}");
 
-               $connection->state = (object)
-                [
-                    'buffer' => '',
-                    'messageData' => '',
-                    'isAuthenticated' => false,
-                    'isTlsActive' => str_starts_with($connection->getRemoteAddress(), 'tls://'),
-                    'fsmState' => 'INITIAL',
-                ]; 
+            $connection->state = (object)[
+                'buffer' => '',
+                'isAuthenticated' => false,
+                'isTlsActive' => str_starts_with($connection->getRemoteAddress(), 'tls://'),
+                'fsmState' => 'INITIAL',
+                'sender' => null,
+                'recipients' => [],
+                'tempFilePath' => null,
+                'tempFileHandle' => null,
+                'bytesReceived' => 0,
+                'maxEmailSize' => 10 * 1024 * 1024, // 10MB limit
+            ]; 
 
             $this->connection[$remoteAddress] = $connection;
-
             $connection->write("220 custom.smtp.server ESMTP\r\n");
 
             $connection->on('data', function($chunk) use($connection, $logger) {
@@ -94,11 +97,13 @@ class SmtpServerCommand extends Command
             });
 
             $connection->on('close', function() use($connection, $logger, $remoteAddress) {
+                $this->cleanupTempFile($connection);
                 $this->info("Connection from {$remoteAddress} closed");
                 unset($this->connection[$remoteAddress]);
             });
 
             $connection->on('error', function(Exception $e) use($connection, $logger, $remoteAddress) {
+                $this->cleanupTempFile($connection);
                 $this->error("Connection error from {$remoteAddress} ". $e->getMessage());
             });
         });
@@ -134,21 +139,14 @@ class SmtpServerCommand extends Command
         $state = $connection->state;
     
         if($state->fsmState === 'RECEIVING_DATA') {
-            if(str_contains($state->buffer, "\r\n.\r\n")) {
-                list($messagePart, $rest) = explode("\r\n.\r\n", $state->buffer, 2);
-                $state->messageData .= $messagePart;
-                $state->buffer = $rest;
-                $state->fsmState = "HELLO_RECEIVED";
-                $connection->write("250 OK: Message accepted\r\n");
-            }
+            $this->processEmailData($connection, $logger);
             return;
         }
     
-        // Process commands line by line
         while(str_contains($state->buffer, "\r\n")) {
             list($line, $rest) = explode("\r\n", $state->buffer, 2);
             $state->buffer = $rest;
-            
+                
             $this->info("Processing command: '{$line}'");
             
             $this->handleCommand($connection, $line, $logger); 
@@ -286,19 +284,24 @@ class SmtpServerCommand extends Command
         $state = $connection->state;
         
         if($state->fsmState !== "RCPT_TO_RECEIVED") {
-            $connection->write("503 Error: need MAIL command\r\n");
+            $connection->write("503 Error: need RCPT command\r\n");
             return;
         }
         
-        $rawEmail = $state->messageData;
-        $sender = $state->sender;
-        $recipients = $state->recipients;
-        $this->storeEmail($rawEmail, $sender, $recipients);
-        $connection->write("250 OK: Message accepted\r\n");
-        $state->fsmState = 'HELLO_RECEIVED';
-        $state->sender = null;
-        $state->recipients = [];
-        $state->messageData = '';
+        $tempFilePath = $this->createTempFile();
+        $tempFileHandle = fopen($tempFilePath, 'w');
+        
+        if (!$tempFileHandle) {
+            $connection->write("451 Temporary failure: Unable to create temp file\r\n");
+            return;
+        }
+        
+        $state->tempFilePath = $tempFilePath;
+        $state->tempFileHandle = $tempFileHandle;
+        $state->bytesReceived = 0;
+        $state->fsmState = "RECEIVING_DATA";
+        
+        $connection->write("354 Start mail input; end with <CRLF>.<CRLF>\r\n");
     }
 
     private function handleQuitCommand(ConnectionInterface $connection)
@@ -466,4 +469,135 @@ class SmtpServerCommand extends Command
         }
     }
 
+    private function processEmailData(ConnectionInterface $connection, LoggerInterface $logger)
+    {
+        $state = $connection->state;
+        
+        // Check for end-of-data marker
+        if(str_contains($state->buffer, "\r\n.\r\n")) {
+            list($finalChunk, $rest) = explode("\r\n.\r\n", $state->buffer, 2);
+            
+            if (!empty($finalChunk)) {
+                if (!$this->writeChunkToFile($connection, $finalChunk)) {
+                    return;
+                }
+            }
+            
+            $state->buffer = $rest;
+            $this->finalizeEmail($connection, $logger);
+            return;
+        }
+        
+        // Stream data in chunks
+        if (strlen($state->buffer) > 8192) { // 8KB chunks
+            $chunk = substr($state->buffer, 0, 8192);
+            $state->buffer = substr($state->buffer, 8192);
+            
+            if (!$this->writeChunkToFile($connection, $chunk)) {
+                return; 
+            }
+        }
+    }
+
+    private function writeChunkToFile(ConnectionInterface $connection, string $chunk): bool
+    {
+        $state = $connection->state;
+        
+        if ($state->bytesReceived + strlen($chunk) > $state->maxEmailSize) {
+            $this->cleanupTempFile($connection);
+            $connection->write("552 Message size exceeds maximum allowed size\r\n");
+            $state->fsmState = 'HELLO_RECEIVED';
+            return false;
+        }
+        
+        // Write to file
+        $bytesWritten = fwrite($state->tempFileHandle, $chunk);
+        if ($bytesWritten === false) {
+            $this->cleanupTempFile($connection);
+            $connection->write("451 Temporary failure: Unable to write email data\r\n");
+            $state->fsmState = 'HELLO_RECEIVED';
+            return false;
+        }
+        
+        $state->bytesReceived += $bytesWritten;
+        return true;
+    }
+
+    private function finalizeEmail(ConnectionInterface $connection, LoggerInterface $logger)
+    {
+        $state = $connection->state;
+        
+        if ($state->tempFileHandle) {
+            fclose($state->tempFileHandle);
+            $state->tempFileHandle = null;
+        }
+        
+        $success = $this->moveEmailToMaildir(
+            $state->tempFilePath, 
+            $state->sender, 
+            $state->recipients
+        );
+        
+        if ($success) {
+            $connection->write("250 OK: Message accepted\r\n");
+            $this->info("Email from {$state->sender} ({$state->bytesReceived} bytes) saved to Maildir");
+        } else {
+            $connection->write("451 Temporary failure: Unable to save email\r\n");
+        }
+        
+        $state->fsmState = 'HELLO_RECEIVED';
+        $state->sender = null;
+        $state->recipients = [];
+        $state->tempFilePath = null;
+        $state->bytesReceived = 0;
+    }
+
+    private function createTempFile(): string
+    {
+        $tempDir = storage_path('app/maildir/tmp');
+        if (!is_dir($tempDir)) {
+            mkdir($tempDir, 0777, true);
+        }
+        
+        $uniqueId = time() . '.' . getmypid() . '.' . gethostname() . '.' . Str::random(8);
+        return $tempDir . '/' . $uniqueId . '.tmp';
+    }
+
+    private function moveEmailToMaildir(string $tempFilePath, ?string $sender, array $recipients): bool
+    {
+        try {
+            $maildirRoot = storage_path('app/maildir');
+            $newDir = $maildirRoot . '/new';
+            
+            if (!is_dir($newDir)) {
+                mkdir($newDir, 0777, true);
+            }
+            
+            $uniqueId = basename($tempFilePath, '.tmp');
+            $finalPath = $newDir . '/' . $uniqueId;
+            
+            return rename($tempFilePath, $finalPath);
+            
+        } catch (\Exception $e) {
+            if (file_exists($tempFilePath)) {
+                unlink($tempFilePath);
+            }
+            return false;
+        }
+    }
+
+    private function cleanupTempFile(ConnectionInterface $connection)
+    {
+        $state = $connection->state;
+        
+        if ($state->tempFileHandle) {
+            fclose($state->tempFileHandle);
+            $state->tempFileHandle = null;
+        }
+        
+        if ($state->tempFilePath && file_exists($state->tempFilePath)) {
+            unlink($state->tempFilePath);
+            $state->tempFilePath = null;
+        }
+    }
 }
