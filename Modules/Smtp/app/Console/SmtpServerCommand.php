@@ -416,7 +416,15 @@ class SmtpServerCommand extends Command
 
     private function authenticateUser(ConnectionInterface $connection, string $username, string $password)
     {
-        //It will be implement tomorrow night insallah
+        //Currently going with mock but later it will be implemented using async mysql(https://github.com/friends-of-reactphp/mysql)
+        if($username = "theihasan" && $password = "123456") {
+            $connection->state->isAuthenticated = true;
+            $connection->write("235 2.7.0 Authentication successful\r\n");
+        } else {
+            $connection->write("535 5.7.8 Authentication credentials invalid\r\n");
+            $connection->state->isAuthenticated = false;
+            $this->warn("Authentication failed for {$connection->getRemoteAddress()} with username {$username} and password {$password}");
+        }
     }
 
 }
