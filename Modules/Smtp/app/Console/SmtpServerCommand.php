@@ -4,6 +4,7 @@ namespace Modules\SMTP\Console;
 
 use Exception;
 use React\EventLoop\Loop;
+use Illuminate\Support\Str;
 use Psr\Log\LoggerInterface;
 use React\Socket\SocketServer;
 use Illuminate\Console\Command;
@@ -289,8 +290,15 @@ class SmtpServerCommand extends Command
             return;
         }
         
-        $state->fsmState = "RECEIVING_DATA";
-        $connection->write("354 Start mail input; end with <CRLF>.<CRLF>\r\n");
+        $rawEmail = $state->messageData;
+        $sender = $state->sender;
+        $recipients = $state->recipients;
+        $this->storeEmail($rawEmail, $sender, $recipients);
+        $connection->write("250 OK: Message accepted\r\n");
+        $state->fsmState = 'HELLO_RECEIVED';
+        $state->sender = null;
+        $state->recipients = [];
+        $state->messageData = '';
     }
 
     private function handleQuitCommand(ConnectionInterface $connection)
@@ -424,6 +432,37 @@ class SmtpServerCommand extends Command
             $connection->write("535 5.7.8 Authentication credentials invalid\r\n");
             $connection->state->isAuthenticated = false;
             $this->warn("Authentication failed for {$connection->getRemoteAddress()} with username {$username} and password {$password}");
+        }
+    }
+
+    private function storeEmail(string $rawEmail, ?string $sender, array $recipients): void
+    {
+        $maildirRoot = storage_path('app/maildir');
+        $tmpDir = $maildirRoot . '/tmp';
+        $newDir = $maildirRoot . '/new';
+        $curDir = $maildirRoot . '/cur';
+    
+        if (!is_dir($tmpDir)) { mkdir($tmpDir, 0777, true); }
+        if (!is_dir($newDir)) { mkdir($newDir, 0777, true); }
+        if (!is_dir($curDir)) { mkdir($curDir, 0777, true); }
+    
+        // Generate a unique filename based on Maildir spec (timestamp.pid.hostname.random)
+        $uniqueId = time() . '.' . getmypid() . '.' . gethostname() . '.' . Str::random(8);
+        $tmpFilePath = $tmpDir . '/' . $uniqueId;
+        $newFilePath = $newDir . '/' . $uniqueId;
+    
+        try {
+            file_put_contents($tmpFilePath, $rawEmail);
+    
+            rename($tmpFilePath, $newFilePath);
+    
+            $this->info("Email from {$sender} to " . implode(', ', $recipients) . " saved to Maildir: {$newFilePath}");
+    
+        } catch (\Exception $e) {
+            $this->info("Failed to save email to Maildir: " . $e->getMessage());
+            if (file_exists($tmpFilePath)) {
+                unlink($tmpFilePath);
+            }
         }
     }
 
