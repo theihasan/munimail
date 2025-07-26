@@ -56,7 +56,7 @@ class SmtpServerCommand extends Command
                     'local_pk' => $keyPath,
                     'verify_peer' => false
                 ];
-                $tlsSocket = new SocketServer("tls:://0.0.0.0:{$tlsPort}", $tlsContext, $loop);
+                $tlsSocket = new SocketServer("tls://0.0.0.0:{$tlsPort}", $tlsContext, $loop);
                 $this->info("Listening for secure SMTP on tls://0.0.0.0:{$tlsPort}");
                 $this->setupConnectionHandler($tlsSocket, $logger);
             }catch(Exception $e) {
