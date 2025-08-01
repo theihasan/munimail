@@ -31,20 +31,20 @@ class DnsResolutionService
         $promise->then(
             function (array $records) use (&$result) {
                 $mxRecords = [];
-                foreach ($records as $record) {
-                    // Handle both object and array formats
+                $mxRecords = collect($records)->map(function ($record) {
                     if (is_object($record)) {
-                        $mxRecords[] = [
+                        return [
                             'host' => $record->exchange,
                             'priority' => $record->priority,
                         ];
                     } elseif (is_array($record)) {
-                        $mxRecords[] = [
+                        return [
                             'host' => $record['exchange'] ?? $record['target'],
                             'priority' => $record['priority'] ?? 10,
                         ];
                     }
-                }
+                    return null;
+                })->filter()->values()->all();
                 
                 // Sort by priority (lower is higher priority)
                 usort($mxRecords, fn($a, $b) => $a['priority'] <=> $b['priority']);
@@ -108,20 +108,24 @@ class DnsResolutionService
             function (array $records) use (&$result, $hostname) {
                 Log::info("Received " . count($records) . " A records for {$hostname}");
                 $aRecords = [];
-                foreach ($records as $i => $record) {
-                    // Handle string, object, and array formats
-                    if (is_string($record)) {
-                        $aRecords[] = $record;
-                        Log::info("A record (string): " . $record);
-                    } elseif (is_object($record)) {
-                        $aRecords[] = $record->address;
-                        Log::info("A record (object): " . $record->address);
-                    } elseif (is_array($record)) {
-                        $address = $record['address'] ?? $record['target'];
-                        $aRecords[] = $address;
-                        Log::info("A record (array): " . $address);
-                    }
-                }
+                $aRecords = collect($records)->map(function ($record) {
+                    return match (true) {
+                        is_string($record) => (function() use ($record) {
+                            Log::info("A record (string): " . $record);
+                            return $record;
+                        })(),
+                        is_object($record) => (function() use ($record) {
+                            Log::info("A record (object): " . $record->address);
+                            return $record->address;
+                        })(),
+                        is_array($record) => (function() use ($record) {
+                            $address = $record['address'] ?? $record['target'];
+                            Log::info("A record (array): " . $address);
+                            return $address;
+                        })(),
+                        default => null,
+                    };
+                })->filter()->values()->all();
                 Log::info("Final A records: " . json_encode($aRecords));
                 $result = $aRecords;
             },
