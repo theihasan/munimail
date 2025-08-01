@@ -51,10 +51,21 @@ class SmtpServerCommand extends Command
 
         if($certPath && $keyPath) {
             try {
+                // Verify certificate and key files exist
+                if (!file_exists($certPath)) {
+                    throw new Exception("Certificate file not found: {$certPath}");
+                }
+                if (!file_exists($keyPath)) {
+                    throw new Exception("Private key file not found: {$keyPath}");
+                }
+                
                 $tlsContext = [
                     'local_cert' => $certPath,
                     'local_pk' => $keyPath,
-                    'verify_peer' => false
+                    'verify_peer' => false,
+                    'verify_peer_name' => false,
+                    'allow_self_signed' => true,
+                    'security_level' => 0
                 ];
                 $tlsSocket = new SocketServer("tls://0.0.0.0:{$tlsPort}", $tlsContext, $loop);
                 $this->info("Listening for secure SMTP on tls://0.0.0.0:{$tlsPort}");
@@ -177,7 +188,8 @@ class SmtpServerCommand extends Command
             'NOOP' => $this->handleNoopCommand($connection),
             'AUTH' => $this->handleAuthCommand($connection, $args),
             'STARTTLS' => $this->handleStarttlsCommand($connection),
-            'VRFY, EXPN' => $this->handleVrfyCommand($connection, $args),
+            'VRFY' => $this->handleVrfyCommand($connection, $args),
+            'EXPN' => $this->handleVrfyCommand($connection, $args),
             default => $connection->write("500 Error: {$command} not implemented\r\n")
 
         };
@@ -325,23 +337,38 @@ class SmtpServerCommand extends Command
     {
         $state = $connection->state;
         
-        if($state->fsmState !==  'HELO_RECEIVED') {
+        if($state->fsmState !== 'HELLO_RECEIVED') {
             $connection->write("503 Bad sequence of commands or TLS already active\r\n");
             return;
         }
 
-        $connection->write("220 TLS go ahead\r\n");
+        if($state->isTlsActive) {
+            $connection->write("503 TLS already active\r\n");
+            return;
+        }
+
+        $connection->write("220 Ready to start TLS\r\n");
 
         $connection->startTls()->then(function () use ($connection, $state) {
             $state->isTlsActive = true;
-            $connection->write("250 Ready to start TLS\r\n");
             $state->fsmState = 'INITIAL'; // Reset FSM to expect EHLO/HELO again over TLS
-            $connection->state->isAuthenticated = false; // Reset auth state after TLS
+            $state->isAuthenticated = false; // Reset auth state after TLS
+            $this->info("TLS handshake successful for {$connection->getRemoteAddress()}");
         }, function (\Exception $e) use ($connection, $state) {
             $this->error("TLS handshake failed for {$connection->getRemoteAddress()}: ". $e->getMessage());
             $connection->end("550 TLS handshake failed\r\n");
             $connection->close();
         });
+    }
+
+    private function handleNoopCommand(ConnectionInterface $connection)
+    {
+        $connection->write("250 OK\r\n");
+    }
+
+    private function handleVrfyCommand(ConnectionInterface $connection, string $args)
+    {
+        $connection->write("252 OK\r\n");
     }
 
     private function handleAuthCommand(ConnectionInterface $connection, string $args)
@@ -375,6 +402,7 @@ class SmtpServerCommand extends Command
 
         if($state->fsmState !== 'HELLO_RECEIVED') {
             $connection->write("503 Error: bad sequence of commands\r\n");
+            return;
         }
 
         if($initialResponse) {
@@ -395,12 +423,12 @@ class SmtpServerCommand extends Command
         } else {
             $connection->write("334\r\n");
             $connection->once('data', function ($data) use($connection) {
-                $decodedData = base64_decode($data);
+                $decodedData = base64_decode(trim($data));
                 $parts = explode("\0", $decodedData);
 
                 if(count($parts) === 3) {
-                    $username = $parts[0] ?? '';
-                    $password = $parts[1] ?? '';
+                    $username = $parts[1] ?? '';
+                    $password = $parts[2] ?? '';
                     $this->authenticateUser($connection, $username, $password);
                 } else {
                     $connection->write("535 5.7.8 Authentication credentials invalid\r\n");
@@ -419,7 +447,7 @@ class SmtpServerCommand extends Command
             $username = base64_decode(trim($data));
             $connection->write("334 ". base64_encode("Password:"). "\r\n");
             $connection->once('data', function ($data) use($connection, $username) {
-                $password = base64_decode($data);
+                $password = base64_decode(trim($data));
                 $this->authenticateUser($connection, $username, $password);
             });
         });
@@ -429,7 +457,7 @@ class SmtpServerCommand extends Command
     private function authenticateUser(ConnectionInterface $connection, string $username, string $password)
     {
         //Currently going with mock but later it will be implemented using async mysql(https://github.com/friends-of-reactphp/mysql)
-        if($username = "theihasan" && $password = "123456") {
+        if($username == "theihasan" && $password == "123456") {
             $connection->state->isAuthenticated = true;
             $connection->write("235 2.7.0 Authentication successful\r\n");
         } else {
