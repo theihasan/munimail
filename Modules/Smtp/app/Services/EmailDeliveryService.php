@@ -17,15 +17,15 @@ class EmailDeliveryService
      */
     public function isDeliveryEnabled(): bool
     {
-        return env('SMTP_ENABLE_DELIVERY', false);
+        return config('smtp.delivery.enabled', false);
     }
 
     /**
-     * Get internal domains from environment
+     * Get internal domains from configuration
      */
     private function getInternalDomains(): array
     {
-        return array_map('trim', explode(',', env('SMTP_INTERNAL_DOMAINS', 'localhost,127.0.0.1')));
+        return config('smtp.delivery.internal_domains', ['localhost', '127.0.0.1']);
     }
 
     /**
