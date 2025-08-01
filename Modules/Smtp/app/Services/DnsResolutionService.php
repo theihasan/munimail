@@ -168,10 +168,10 @@ class DnsResolutionService
     }
 
     /**
-     * Get DNS server with environment variable support
+     * Get DNS server from configuration
      */
     private function getDnsServer(): string
     {
-        return env('SMTP_DNS_SERVER', $this->dnsServer);
+        return config('smtp.dns.server', $this->dnsServer);
     }
 } 
