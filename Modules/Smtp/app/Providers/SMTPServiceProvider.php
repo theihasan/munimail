@@ -5,6 +5,7 @@ namespace Modules\SMTP\Providers;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider;
 use Modules\SMTP\Console\SmtpServerCommand;
+use Modules\SMTP\Console\TestSmtpDeliveryCommand;
 use Nwidart\Modules\Traits\PathNamespace;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
@@ -46,7 +47,8 @@ class SMTPServiceProvider extends ServiceProvider
     {
        if($this->app->runningInConsole()) {
             $this->commands([
-                SmtpServerCommand::class
+                SmtpServerCommand::class,
+                TestSmtpDeliveryCommand::class,
             ]);
        }
     }
