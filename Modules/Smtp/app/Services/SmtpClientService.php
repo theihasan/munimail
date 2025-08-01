@@ -16,22 +16,22 @@ class SmtpClientService
     }
 
     /**
-     * Get timeout value with environment variable support
+     * Get timeout value from configuration
      */
     private function getTimeout(): int
     {
-        return (int) env('SMTP_CLIENT_TIMEOUT', $this->timeout);
+        return (int) config('smtp.client.timeout', $this->timeout);
     }
 
     /**
-     * Get TLS options with environment variable support
+     * Get TLS options from configuration
      */
     private function getTlsOptions(): array
     {
-        return [
+        return config('smtp.client.tls', [
             'verify_peer' => false,
             'verify_peer_name' => false,
-        ];
+        ]);
     }
 
     /**
