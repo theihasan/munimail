@@ -10,9 +10,8 @@ use Illuminate\Support\Facades\Log;
 class DnsResolutionService
 {
     public function __construct(
-        private readonly ?string $dnsServer = null
+        private readonly string $dnsServer = '8.8.8.8'
     ) {
-        $this->dnsServer = $dnsServer ?? env('SMTP_DNS_SERVER', '8.8.8.8');
     }
 
     /**
@@ -22,7 +21,7 @@ class DnsResolutionService
     {
         $loop = Loop::get();
         $dnsFactory = new DnsFactory();
-        $resolver = $dnsFactory->create($this->dnsServer, $loop);
+        $resolver = $dnsFactory->create($this->getDnsServer(), $loop);
         
         $promise = $resolver->resolveAll($domain, Message::TYPE_MX);
         
@@ -98,7 +97,7 @@ class DnsResolutionService
         
         $loop = Loop::get();
         $dnsFactory = new DnsFactory();
-        $resolver = $dnsFactory->create($this->dnsServer, $loop);
+        $resolver = $dnsFactory->create($this->getDnsServer(), $loop);
         
         $promise = $resolver->resolveAll($hostname, Message::TYPE_A);
         
@@ -162,5 +161,13 @@ class DnsResolutionService
 
         // Return the first IP address
         return $aRecords[0];
+    }
+
+    /**
+     * Get DNS server with environment variable support
+     */
+    private function getDnsServer(): string
+    {
+        return env('SMTP_DNS_SERVER', $this->dnsServer);
     }
 } 
