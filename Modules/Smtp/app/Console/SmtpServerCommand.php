@@ -51,7 +51,6 @@ class SmtpServerCommand extends Command
 
         if($certPath && $keyPath) {
             try {
-                // Verify certificate and key files exist
                 if (!file_exists($certPath)) {
                     throw new Exception("Certificate file not found: {$certPath}");
                 }
@@ -59,20 +58,41 @@ class SmtpServerCommand extends Command
                     throw new Exception("Private key file not found: {$keyPath}");
                 }
                 
+                // ReactPHP TLS context configuration
                 $tlsContext = [
-                    'local_cert' => $certPath,
-                    'local_pk' => $keyPath,
-                    'verify_peer' => false,
-                    'verify_peer_name' => false,
-                    'allow_self_signed' => true,
-                    'security_level' => 0
+                    'tls' => [
+                        'local_cert' => $certPath,
+                        'local_pk' => $keyPath,
+                        'verify_peer' => false,
+                        'verify_peer_name' => false,
+                        'allow_self_signed' => true,
+                        'crypto_method' => STREAM_CRYPTO_METHOD_TLS_SERVER
+                    ]
                 ];
+                
+                $this->info("Starting TLS SMTP server on port {$tlsPort}...");
                 $tlsSocket = new SocketServer("tls://0.0.0.0:{$tlsPort}", $tlsContext, $loop);
                 $this->info("Listening for secure SMTP on tls://0.0.0.0:{$tlsPort}");
                 $this->setupConnectionHandler($tlsSocket, $logger);
             }catch(Exception $e) {
                 $this->error("Could not start TLS SMTP server: ". $e->getMessage());
-                return Command::FAILURE;
+                $this->warn("Trying minimal TLS setup...");
+                
+                try {
+                    $minimalTlsContext = [
+                        'tls' => [
+                            'local_cert' => $certPath,
+                            'local_pk' => $keyPath,
+                            'allow_self_signed' => true
+                        ]
+                    ];
+                    $tlsSocket = new SocketServer("tls://0.0.0.0:{$tlsPort}", $minimalTlsContext, $loop);
+                    $this->info("Listening for secure SMTP on tls://0.0.0.0:{$tlsPort} (minimal mode)");
+                    $this->setupConnectionHandler($tlsSocket, $logger);
+                } catch (Exception $fallbackE) {
+                    $this->error("TLS minimal setup also failed: " . $fallbackE->getMessage());
+                    return Command::FAILURE;
+                }
             }
         } else {
             $this->warn("TLS certificate and key not provided. TLS SMTP server will not start on port {$tlsPort}.");
