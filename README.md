@@ -91,7 +91,72 @@ SMTP_TLS_CERT_PATH=/path/to/cert.pem
 SMTP_TLS_KEY_PATH=/path/to/key.pem
 ```
 
-#### **2. Queue Configuration**
+#### **2. TLS Certificate Setup**
+
+**Option A: Self-Signed Certificate (Development/Testing)**
+```bash
+# Generate self-signed certificate for testing
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+
+# Or with more specific parameters
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes \
+  -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost"
+```
+
+**Option B: Let's Encrypt Certificate (Production)**
+```bash
+# Install certbot
+sudo apt-get install certbot
+
+# Generate certificate for your domain
+sudo certbot certonly --standalone -d yourdomain.com
+
+# Copy certificates to your project
+sudo cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem ./cert.pem
+sudo cp /etc/letsencrypt/live/yourdomain.com/privkey.pem ./key.pem
+
+# Set proper permissions
+sudo chown www-data:www-data cert.pem key.pem
+sudo chmod 600 key.pem
+sudo chmod 644 cert.pem
+```
+
+**Option C: Custom Certificate Authority (Enterprise)**
+```bash
+# Generate CA private key
+openssl genrsa -out ca-key.pem 4096
+
+# Generate CA certificate
+openssl req -new -x509 -days 365 -key ca-key.pem -out ca-cert.pem \
+  -subj "/C=US/ST=State/L=City/O=Organization/CN=MyCA"
+
+# Generate server private key
+openssl genrsa -out server-key.pem 4096
+
+# Create server certificate signing request
+openssl req -new -key server-key.pem -out server.csr \
+  -subj "/C=US/ST=State/L=City/O=Organization/CN=yourdomain.com"
+
+# Sign server certificate with CA
+openssl x509 -req -in server.csr -CA ca-cert.pem -CAkey ca-key.pem \
+  -CAcreateserial -out cert.pem -days 365
+
+# Clean up CSR
+rm server.csr
+```
+
+**Certificate File Structure:**
+```
+munimail/
+├── certificates/
+│   ├── cert.pem          # Certificate file
+│   ├── key.pem           # Private key file
+│   └── ca-cert.pem       # CA certificate (if using custom CA)
+├── .env
+└── ...
+```
+
+#### **3. Queue Configuration**
 ```bash
 # .env file - Choose your queue driver
 QUEUE_CONNECTION=database  # or redis, sync
@@ -99,6 +164,30 @@ QUEUE_CONNECTION=database  # or redis, sync
 # For database queues
 php artisan queue:table
 php artisan migrate
+```
+
+#### **4. Quick Certificate Commands Reference**
+
+**Development (Self-Signed):**
+```bash
+# Generate certificate
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+
+# Start server
+php artisan smtp:serve --port=25 --tls-port=587 --cert=cert.pem --key=key.pem
+```
+
+**Production (Let's Encrypt):**
+```bash
+# Generate certificate
+sudo certbot certonly --standalone -d yourdomain.com
+
+# Copy certificates
+sudo cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem ./cert.pem
+sudo cp /etc/letsencrypt/live/yourdomain.com/privkey.pem ./key.pem
+
+# Start server
+php artisan smtp:serve --port=25 --tls-port=587 --cert=cert.pem --key=key.pem
 ```
 
 ### **Running the Server**
@@ -116,6 +205,8 @@ php artisan smtp:serve --port=2525
 ```
 
 #### **Method 2: With TLS Support**
+
+**Quick Start (Self-Signed Certificate):**
 ```bash
 # Generate self-signed certificate for testing
 openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
@@ -123,6 +214,47 @@ openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -node
 # Start with TLS
 php artisan smtp:serve --port=25 --tls-port=587 --cert=cert.pem --key=key.pem
 ```
+
+**Production Setup (Let's Encrypt):**
+```bash
+# After generating certificates with certbot (see Configuration section)
+php artisan smtp:serve --port=25 --tls-port=587 --cert=cert.pem --key=key.pem
+```
+
+**Testing TLS Connection:**
+```bash
+# Test with openssl
+openssl s_client -connect localhost:587 -starttls smtp
+
+# Test with telnet (then STARTTLS)
+telnet localhost 25
+
+# Test with curl (if you have a test endpoint)
+curl --insecure -v telnet://localhost:587
+```
+
+**Common TLS Issues & Solutions:**
+
+1. **Certificate not found:**
+   ```bash
+   # Check certificate exists and has correct permissions
+   ls -la cert.pem key.pem
+   chmod 600 key.pem
+   chmod 644 cert.pem
+   ```
+
+2. **Permission denied:**
+   ```bash
+   # Run with proper user permissions
+   sudo php artisan smtp:serve --port=25 --tls-port=587 --cert=cert.pem --key=key.pem
+   ```
+
+3. **Certificate validation failed:**
+   ```bash
+   # For development, use self-signed certificates
+   # For production, ensure proper CA chain
+   openssl verify -CAfile ca-cert.pem cert.pem
+   ```
 
 #### **Method 3: Production Setup**
 ```bash
@@ -148,7 +280,7 @@ stdout_logfile=/path/to/munimail/storage/logs/queue.log
 
 [program:munimail-smtp]
 process_name=%(program_name)s
-command=php /path/to/munimail/artisan smtp:serve --port=25 --tls-port=587
+command=php /path/to/munimail/artisan smtp:serve --port=25 --tls-port=587 --cert=/path/to/munimail/cert.pem --key=/path/to/munimail/key.pem
 directory=/path/to/munimail
 autostart=true
 autorestart=true
@@ -162,6 +294,42 @@ stdout_logfile=/path/to/munimail/storage/logs/smtp.log
 sudo supervisorctl reread
 sudo supervisorctl update
 sudo supervisorctl start all
+```
+
+#### **Certificate Renewal (Production)**
+
+**Let's Encrypt Auto-Renewal:**
+```bash
+# Set up automatic renewal
+sudo crontab -e
+
+# Add this line for daily renewal checks
+0 12 * * * /usr/bin/certbot renew --quiet && cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem /path/to/munimail/cert.pem && cp /etc/letsencrypt/live/yourdomain.com/privkey.pem /path/to/munimail/key.pem && sudo supervisorctl restart munimail-smtp
+```
+
+**Manual Renewal:**
+```bash
+# Renew certificate
+sudo certbot renew
+
+# Copy new certificates
+sudo cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem /path/to/munimail/cert.pem
+sudo cp /etc/letsencrypt/live/yourdomain.com/privkey.pem /path/to/munimail/key.pem
+
+# Restart SMTP server
+sudo supervisorctl restart munimail-smtp
+```
+
+**Certificate Health Check:**
+```bash
+# Check certificate expiration
+openssl x509 -in cert.pem -text -noout | grep "Not After"
+
+# Verify certificate chain
+openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt cert.pem
+
+# Test TLS connection
+echo "QUIT" | openssl s_client -connect localhost:587 -starttls smtp
 ```
 
 ---
