@@ -104,14 +104,13 @@ class EmailDeliveryService
     {
         $externalRecipients = [];
 
-        foreach ($recipients as $recipient) {
-            $domain = $this->extractDomain($recipient);
-            
-            // If domain is not internal, it's external
-            if (!in_array($domain, $this->getInternalDomains())) {
-                $externalRecipients[] = $recipient;
-            }
-        }
+        $externalRecipients = collect($recipients)
+            ->reject(function ($recipient) {
+                $domain = $this->extractDomain($recipient);
+                return in_array($domain, $this->getInternalDomains());
+            })
+            ->values()
+            ->all();
 
         return $externalRecipients;
     }
