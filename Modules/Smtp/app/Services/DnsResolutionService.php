@@ -174,4 +174,13 @@ class DnsResolutionService
     {
         return config('smtp.dns.server', $this->dnsServer);
     }
+
+    /**
+     * Extract domain from email address
+     */
+    private function extractDomain(string $email): string
+    {
+        $parts = explode('@', $email);
+        return count($parts) > 1 ? $parts[1] : 'localhost';
+    }
 } 

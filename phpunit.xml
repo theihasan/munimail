@@ -11,10 +11,14 @@
         <testsuite name="Feature">
             <directory>tests/Feature</directory>
         </testsuite>
+        <testsuite name="SMTP">
+            <directory>Modules/SMTP/tests</directory>
+        </testsuite>
     </testsuites>
     <source>
         <include>
             <directory>app</directory>
+            <directory>Modules/SMTP/app</directory>
         </include>
     </source>
     <php>
@@ -30,5 +34,9 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <env name="SMTP_ENABLE_DELIVERY" value="false"/>
+        <env name="SMTP_DNS_SERVER" value="8.8.8.8"/>
+        <env name="SMTP_CLIENT_TIMEOUT" value="5"/>
+        <env name="SMTP_INTERNAL_DOMAINS" value="localhost,127.0.0.1"/>
     </php>
 </phpunit>
