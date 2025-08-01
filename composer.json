@@ -13,6 +13,8 @@
         "laravel/framework": "^12.0",
         "laravel/tinker": "^2.10.1",
         "nwidart/laravel-modules": "^12.0",
+        "react/dns": "^1.13",
+        "react/socket": "^1.16",
         "wikimedia/composer-merge-plugin": "^2.1"
     },
     "require-dev": {
