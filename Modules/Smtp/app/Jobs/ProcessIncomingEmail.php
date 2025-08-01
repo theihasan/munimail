@@ -36,11 +36,41 @@ class ProcessIncomingEmail implements ShouldQueue
         }
 
         $emailContent = file_get_contents($this->emailFilePath);
-        // Here Email headers will be parsed, attachments will be extracted, and then it will be stored in database using  async mysql and apply content filtering
         
         Log::info("Processing email from {$this->sender} to " . implode(', ', $this->recipients) . " (Size: {$this->emailSize} bytes)");
         
+        // Send email to external recipients via direct MX delivery
+        $this->deliverEmail();
+        
         $this->moveEmailToCur();
+    }
+
+    /**
+     * Deliver email to external recipients
+     */
+    private function deliverEmail(): void
+    {
+        try {
+            $deliveryService = new \Modules\SMTP\Services\EmailDeliveryService(
+                new \Modules\SMTP\Services\DnsResolutionService(),
+                new \Modules\SMTP\Services\SmtpClientService()
+            );
+            
+            if (!$deliveryService->isDeliveryEnabled()) {
+                Log::info("Email delivery is disabled - skipping external delivery");
+                return;
+            }
+            
+            $success = $deliveryService->sendEmail($this->emailFilePath, $this->sender, $this->recipients);
+            
+            if ($success) {
+                Log::info("Email delivery completed successfully");
+            }
+            
+        } catch (\Exception $e) {
+            Log::error("Email delivery failed: " . $e->getMessage());
+            // Don't throw - email is still saved to Maildir
+        }
     }
     
     private function moveEmailToCur(): void
